@@ -1,9 +1,24 @@
 
 import { useEffect, useMemo, useState } from "react";
+import AcademicRecordsPanel from "./components/AcademicRecordsPanel.jsx";
+import AnalyticsPanel from "./components/AnalyticsPanel.jsx";
+import PredictionsPanel from "./components/PredictionsPanel.jsx";
+import AdminSettingsPanel from "./components/AdminSettingsPanel.jsx";
+import ReportsPanel from "./components/ReportsPanel.jsx";
 import "./App.css";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8081").replace(/\/+$/, "");
 const API_URL = `${API_BASE_URL}/api/students`;
+
+function getStoredAuth() {
+  try {
+    const token = sessionStorage.getItem("eduinsight_token");
+    const user = JSON.parse(sessionStorage.getItem("eduinsight_user") || "null");
+    return token && user ? { token, user } : null;
+  } catch {
+    return null;
+  }
+}
 
 const icons = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
@@ -39,6 +54,7 @@ const navItems = [
   { label: "Overview", icon: "overview" },
   { label: "Students", icon: "students" },
   { label: "Attendance", icon: "attendance" },
+  { label: "Marks", icon: "chart" },
   { label: "Performance", icon: "chart" },
   { label: "AI Predictions", icon: "brain" },
   { label: "Reports", icon: "reports" },
@@ -54,8 +70,20 @@ const initialForm = {
 };
 
 function App() {
+  const [auth, setAuth] = useState(getStoredAuth);
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({
+    email: "", password: "", rollNumber: "", fullName: "", department: "AIML", academicYear: "2", section: "A",
+  });
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [studentProfile, setStudentProfile] = useState(null);
+  const [studentAttendance, setStudentAttendance] = useState([]);
+  const [studentMarks, setStudentMarks] = useState([]);
   const [activePage, setActivePage] = useState("Overview");
   const [students, setStudents] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState("");
   const [loading, setLoading] = useState(true);
   const [apiOnline, setApiOnline] = useState(false);
   const [error, setError] = useState("");
@@ -67,12 +95,20 @@ function App() {
   const [toast, setToast] = useState("");
 
   async function loadStudents() {
+    if (!auth?.token) return;
     setLoading(true);
     try {
-      const response = await fetch(API_URL);
+      const response = await fetch(API_URL, { headers: { Authorization: `Bearer ${auth.token}` } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setStudents(data);
+      const analyticsResponse = await fetch(`${API_BASE_URL}/api/analytics/summary`, {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      if (analyticsResponse.ok) {
+        setAnalytics(await analyticsResponse.json());
+        setAnalyticsError("");
+      }
       setApiOnline(true);
       setError("");
     } catch {
@@ -84,8 +120,117 @@ function App() {
   }
 
   useEffect(() => {
-    loadStudents();
-  }, []);
+    if (!auth?.token) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    async function verifySessionAndLoadData() {
+      try {
+        const userResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${auth.token}` },
+        });
+        if (!userResponse.ok) throw new Error("Your session has expired. Please sign in again.");
+        const user = await userResponse.json();
+        if (cancelled) return;
+        setAuth((current) => current?.token === auth.token ? { ...current, user } : current);
+
+        if (user.role === "STUDENT") {
+          const authHeaders = { Authorization: `Bearer ${auth.token}` };
+          const [profileResponse, attendanceResponse, marksResponse] = await Promise.all([
+            fetch(`${API_BASE_URL}/api/auth/me/student`, { headers: authHeaders }),
+            fetch(`${API_BASE_URL}/api/auth/me/attendance`, { headers: authHeaders }),
+            fetch(`${API_BASE_URL}/api/auth/me/marks`, { headers: authHeaders }),
+          ]);
+          if (!profileResponse.ok || !attendanceResponse.ok || !marksResponse.ok) throw new Error("Unable to load your academic profile and records.");
+          const [profile, attendanceData, marksData] = await Promise.all([
+            profileResponse.json(), attendanceResponse.json(), marksResponse.json(),
+          ]);
+          if (cancelled) return;
+          setStudentProfile(profile);
+          setStudentAttendance(attendanceData);
+          setStudentMarks(marksData);
+          setApiOnline(true);
+        } else {
+          const studentsResponse = await fetch(API_URL, {
+            headers: { Authorization: `Bearer ${auth.token}` },
+          });
+          if (!studentsResponse.ok) throw new Error(`Student records request failed (${studentsResponse.status}).`);
+          const data = await studentsResponse.json();
+          if (cancelled) return;
+          setStudents(data);
+          const analyticsResponse = await fetch(`${API_BASE_URL}/api/analytics/summary`, {
+            headers: { Authorization: `Bearer ${auth.token}` },
+          });
+          if (analyticsResponse.ok) {
+            const summary = await analyticsResponse.json();
+            if (!cancelled) setAnalytics(summary);
+            setAnalyticsError("");
+          } else {
+            setAnalyticsError("Analytics are currently unavailable.");
+          }
+          setApiOnline(true);
+          setError("");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        sessionStorage.removeItem("eduinsight_token");
+        sessionStorage.removeItem("eduinsight_user");
+        setAuth(null);
+        setAuthError(err.message || "Unable to verify your account.");
+        setApiOnline(false);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    verifySessionAndLoadData();
+    return () => { cancelled = true; };
+  }, [auth?.token]);
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthError("");
+    const isRegister = authMode === "register";
+    const payload = isRegister
+      ? { ...authForm, academicYear: Number(authForm.academicYear) }
+      : { email: authForm.email, password: authForm.password };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/${isRegister ? "register" : "login"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || result.message || `Sign in failed (${response.status}).`);
+      const nextAuth = { token: result.accessToken, user: result.user };
+      sessionStorage.setItem("eduinsight_token", nextAuth.token);
+      sessionStorage.setItem("eduinsight_user", JSON.stringify(nextAuth.user));
+      setAuth(nextAuth);
+      setAuthForm((current) => ({ ...current, password: "" }));
+    } catch (err) {
+      setAuthError(err.message || "Unable to sign in.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function signOut() {
+    sessionStorage.removeItem("eduinsight_token");
+    sessionStorage.removeItem("eduinsight_user");
+    setAuth(null);
+    setAuthError("");
+    setStudentProfile(null);
+    setStudentAttendance([]);
+    setStudentMarks([]);
+    setStudents([]);
+    setAnalytics(null);
+    setApiOnline(false);
+    setLoading(false);
+    setActivePage("Overview");
+  }
 
   const filteredStudents = useMemo(() => {
     const term = query.toLowerCase().trim();
@@ -134,7 +279,7 @@ function App() {
         editingStudent ? `${API_URL}/${editingStudent.id}` : API_URL,
         {
           method: editingStudent ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
           body: JSON.stringify(payload),
         }
       );
@@ -163,6 +308,7 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/${student.id}`, {
         method: "DELETE",
+        headers: { Authorization: `Bearer ${auth.token}` },
       });
       if (!response.ok) throw new Error(`Delete failed (${response.status}).`);
       await loadStudents();
@@ -175,6 +321,98 @@ function App() {
 
   const isStudentsPage = activePage === "Students";
   const supportedPage = activePage === "Overview" || isStudentsPage;
+
+  if (!auth?.token) {
+    const isRegister = authMode === "register";
+    return (
+      <div className="auth-shell">
+        <section className="auth-showcase">
+          <div className="brand auth-brand">
+            <div className="brand-mark">E<span>.</span></div>
+            <div className="brand-copy"><strong>Edu<span>Insight</span></strong><small>ACADEMIC INTELLIGENCE</small></div>
+          </div>
+          <div className="auth-showcase-copy">
+            <span className="auth-kicker">A CLEARER VIEW OF STUDENT SUCCESS</span>
+            <h1>Better insight.<br/><span>Better outcomes.</span></h1>
+            <p>Bring academic records together and help every student make meaningful progress.</p>
+            <div className="auth-showcase-stat"><span>01</span><div><strong>Private by design</strong><small>Your academic data is available only to authorized accounts.</small></div></div>
+          </div>
+          <div className="auth-showcase-footer">INTELLIGENT ACADEMIC ANALYTICS · 2026</div>
+        </section>
+        <section className="auth-panel">
+          <form className="auth-card" onSubmit={handleAuthSubmit}>
+            <span className="auth-card-kicker">EDUINSIGHT WORKSPACE</span>
+            <h2>{isRegister ? "Create your student account" : "Welcome back"}</h2>
+            <p className="auth-card-copy">{isRegister ? "Register with your academic details to open your personal workspace." : "Sign in to continue to your academic workspace."}</p>
+            <label className="form-field auth-field">
+              <span>Email address</span>
+              <input type="email" required autoComplete="email" value={authForm.email} onChange={(e) => setAuthForm({...authForm, email: e.target.value})} placeholder="you@college.edu" />
+            </label>
+            {isRegister && (
+              <>
+                <label className="form-field auth-field"><span>Full name</span><input required maxLength="150" value={authForm.fullName} onChange={(e) => setAuthForm({...authForm, fullName: e.target.value})} placeholder="Your full name" /></label>
+                <div className="auth-fields-row">
+                  <label className="form-field auth-field"><span>Roll number</span><input required maxLength="50" value={authForm.rollNumber} onChange={(e) => setAuthForm({...authForm, rollNumber: e.target.value})} placeholder="Your roll number" /></label>
+                  <label className="form-field auth-field"><span>Department</span><select value={authForm.department} onChange={(e) => setAuthForm({...authForm, department: e.target.value})}><option value="AIML">AIML</option><option value="CSE">CSE</option><option value="ECE">ECE</option><option value="EEE">EEE</option><option value="IT">IT</option><option value="Other">Other</option></select></label>
+                </div>
+                <div className="auth-fields-row">
+                  <label className="form-field auth-field"><span>Academic year</span><select value={authForm.academicYear} onChange={(e) => setAuthForm({...authForm, academicYear: e.target.value})}><option value="1">First year</option><option value="2">Second year</option><option value="3">Third year</option><option value="4">Fourth year</option></select></label>
+                  <label className="form-field auth-field"><span>Section</span><select value={authForm.section} onChange={(e) => setAuthForm({...authForm, section: e.target.value})}><option value="A">Section A</option><option value="B">Section B</option><option value="C">Section C</option><option value="D">Section D</option></select></label>
+                </div>
+              </>
+            )}
+            <label className="form-field auth-field">
+              <span>Password{isRegister ? " · at least 12 characters" : ""}</span>
+              <input type="password" required minLength={isRegister ? 12 : undefined} maxLength="72" autoComplete={isRegister ? "new-password" : "current-password"} value={authForm.password} onChange={(e) => setAuthForm({...authForm, password: e.target.value})} placeholder={isRegister ? "Create a strong password" : "Enter your password"} />
+            </label>
+            {authError && <div className="auth-error" role="alert">{authError}</div>}
+            <button className="primary-button auth-submit" type="submit" disabled={authLoading}>{authLoading ? "Please wait…" : isRegister ? "Create student account" : "Sign in"}</button>
+            <div className="auth-switch">
+              {isRegister ? "Already have an account?" : "New student?"}{" "}
+              <button type="button" onClick={() => {setAuthMode(isRegister ? "login" : "register");setAuthError("");}}> {isRegister ? "Sign in" : "Create an account"}</button>
+            </div>
+            <p className="auth-access-note">Faculty accounts are created by an administrator.</p>
+          </form>
+        </section>
+      </div>
+    );
+  }
+
+  if (!auth.user) {
+    return <div className="auth-loading">Checking your EduInsight session…</div>;
+  }
+
+  if (auth.user.role === "STUDENT") {
+    return (
+      <div className="student-portal">
+        <header className="portal-header">
+          <div className="brand"><div className="brand-mark">E<span>.</span></div><div className="brand-copy"><strong>Edu<span>Insight</span></strong><small>STUDENT WORKSPACE</small></div></div>
+          <div className="portal-user"><span className="portal-user-name">{auth.user.fullName}</span><button className="logout-button" onClick={signOut}>Sign out</button></div>
+        </header>
+        <main className="portal-main">
+          <span className="section-kicker">YOUR ACADEMIC PROFILE</span>
+          <h1>Welcome, {studentProfile?.fullName || auth.user.fullName.split(" ")[0]}.</h1>
+          <p className="page-subtitle">Your academic information is private to your account.</p>
+          {loading ? <div className="panel portal-loading">Loading your profile…</div> : studentProfile ? (
+            <section className="panel portal-profile">
+              <div className="portal-profile-avatar">{studentProfile.fullName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div>
+              <div><span className="section-kicker">STUDENT DETAILS</span><h2>{studentProfile.fullName}</h2><p>{studentProfile.email}</p></div>
+              <dl><div><dt>Roll number</dt><dd>{studentProfile.rollNumber}</dd></div><div><dt>Department</dt><dd>{studentProfile.department}</dd></div><div><dt>Year and section</dt><dd>Year {studentProfile.academicYear} · Section {studentProfile.section}</dd></div></dl>
+              <div className="portal-notice">Your attendance and assessment history is visible only to your student account.</div>
+            </section>
+          ) : <div className="error-banner" role="alert">{error || "Your student profile could not be loaded. Sign out and sign in again."}</div>}
+          {studentProfile && <div className="portal-record-grid">
+            <section className="panel portal-record-panel"><div className="panel-heading"><div><span className="section-kicker">CLASS HISTORY</span><h3>Attendance</h3></div><span className="module-count">{studentAttendance.length} entries</span></div>
+              {studentAttendance.length ? <div className="portal-list">{studentAttendance.slice(0, 8).map((record) => <div className="portal-list-row" key={record.id}><span><strong>{record.subjectName}</strong><small>{record.subjectCode} · {record.classDate}</small></span><span className={`status-tag ${record.status.toLowerCase()}`}>{record.status}</span></div>)}</div> : <p className="table-message">No attendance entries have been recorded.</p>}
+            </section>
+            <section className="panel portal-record-panel"><div className="panel-heading"><div><span className="section-kicker">ASSESSMENT HISTORY</span><h3>Marks</h3></div><span className="module-count">{studentMarks.length} entries</span></div>
+              {studentMarks.length ? <div className="portal-list">{studentMarks.slice(0, 8).map((record) => <div className="portal-list-row" key={record.id}><span><strong>{record.subjectName} · {record.assessmentName}</strong><small>{record.subjectCode} · {record.assessedAt}</small></span><span className="portal-score">{record.score} / {record.maxScore}</span></div>)}</div> : <p className="table-message">No assessment scores have been recorded.</p>}
+            </section>
+          </div>}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -219,10 +457,10 @@ function App() {
             <span className="help-status"><span /> AI analytics coming soon</span>
           </div>
           <div className="profile">
-            <div className="profile-avatar">VS</div>
+            <div className="profile-avatar">{auth.user.fullName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div>
             <div className="profile-copy">
-              <strong>Faculty Workspace</strong>
-              <small>Academic administrator</small>
+              <strong>{auth.user.fullName}</strong>
+              <small>{auth.user.role === "ADMIN" ? "Administrator" : "Faculty"}</small>
             </div>
             <span className="profile-dots">•••</span>
           </div>
@@ -240,7 +478,8 @@ function App() {
               <span className="connection-dot" />
               {apiOnline ? "Backend connected" : loading ? "Connecting..." : "Backend offline"}
             </div>
-            <div className="top-avatar">VS</div>
+            <button className="logout-button" onClick={signOut}>Sign out</button>
+            <div className="top-avatar">{auth.user.fullName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div>
           </div>
         </header>
 
@@ -322,36 +561,30 @@ function App() {
                   <div className="panel performance-panel">
                     <div className="panel-heading">
                       <div>
-                        <span className="section-kicker">ACADEMIC INTELLIGENCE</span>
-                        <h3>Performance analytics</h3>
+                        <span className="section-kicker">DATABASE ANALYTICS</span>
+                        <h3>Academic snapshot</h3>
                       </div>
-                      <span className="coming-badge">NEXT MODULE</span>
+                      <button className="text-button" onClick={() => setActivePage("Performance")}>View analytics <Icon name="chevron" size={15}/></button>
                     </div>
-                    <div className="empty-chart">
-                      <div className="chart-illustration">
-                        <div className="chart-grid-lines"><i/><i/><i/><i/></div>
-                        <div className="chart-bars"><span/><span/><span/><span/><span/><span/><span/></div>
-                        <div className="chart-spark"><Icon name="chart" size={23}/></div>
-                      </div>
-                      <strong>Your next insight starts with academic data.</strong>
-                      <p>Attendance and marks analytics will appear here once those modules are connected.</p>
-                    </div>
+                    {analytics ? <div className="snapshot-grid">
+                      <div><strong>{analytics.averageAttendancePercent == null ? "—" : `${analytics.averageAttendancePercent}%`}</strong><span>Average attendance</span></div>
+                      <div><strong>{analytics.averageMarksPercent == null ? "—" : `${analytics.averageMarksPercent}%`}</strong><span>Average marks</span></div>
+                      <div><strong>{analytics.atRiskCount}</strong><span>Students flagged for review</span></div>
+                    </div> : <div className="empty-chart"><strong>{analyticsError || "No academic records yet."}</strong><p>Record attendance and assessment marks to calculate database analytics.</p><button className="text-button" onClick={() => setActivePage("Attendance")}>Record attendance <Icon name="chevron" size={15}/></button></div>}
+                    <div className="snapshot-actions"><button className="secondary-button" onClick={() => setActivePage("Attendance")}>Manage attendance</button><button className="secondary-button" onClick={() => setActivePage("AI Predictions")}>AI predictions</button></div>
                   </div>
 
                   <div className="panel ai-panel">
                     <div className="ai-panel-top">
                       <span className="ai-icon"><Icon name="sparkles" size={21}/></span>
-                      <span className="ai-label">EDUINSIGHT AI</span>
-                      <span className="ai-pulse"/>
+                      <span className="ai-label">STUDENT SUPPORT REVIEW</span>
                     </div>
-                    <h3>Better support starts with better insight.</h3>
-                    <p>Our planned prediction engine will help identify academic patterns and students who may benefit from additional support.</p>
-                    <div className="ai-feature-list">
-                      <div><span className="feature-check">✓</span> Performance prediction</div>
-                      <div><span className="feature-check">✓</span> Early risk identification</div>
-                      <div><span className="feature-check">✓</span> Personalized recommendations</div>
+                    <h3>{analytics ? `${analytics.atRiskCount} students need review` : "Build a complete academic picture"}</h3>
+                    <p>{analytics?.riskPolicy || "Risk indicators will be calculated from actual attendance and marks entered by faculty."}</p>
+                    {analytics?.atRiskStudents?.length ? <div className="risk-preview">{analytics.atRiskStudents.slice(0, 3).map((student) => <div key={student.studentId}><span className={`status-tag ${student.riskLevel.toLowerCase()}`}>{student.riskLevel}</span><span><strong>{student.fullName}</strong><small>{student.reasons.join(" ")}</small></span></div>)}</div>
+                      : <div className="ai-feature-list"><div><span className="feature-check">✓</span> Attendance below 75% is flagged</div><div><span className="feature-check">✓</span> Marks below 40% are flagged</div><div><span className="feature-check">✓</span> Recommendations explain the next step</div></div>}
+                    <div className="ai-footer"><span>RULE-BASED FLAGS</span><button className="text-button" onClick={() => setActivePage("Performance")}>Review analytics <Icon name="arrow" size={14}/></button>
                     </div>
-                    <div className="ai-footer"><span>PLANNED MODULE</span><span>In development <Icon name="arrow" size={14}/></span></div>
                   </div>
                 </section>
               )}
@@ -444,12 +677,22 @@ function App() {
                 <span><i className={`footer-dot ${apiOnline ? "connected" : ""}`}/> {apiOnline ? "Data service connected" : "Waiting for data service"}</span>
               </footer>
             </>
+          ) : activePage === "Attendance" || activePage === "Marks" ? (
+            <AcademicRecordsPanel page={activePage} apiBaseUrl={API_BASE_URL} token={auth.token} students={students} />
+          ) : activePage === "Performance" ? (
+            <AnalyticsPanel apiBaseUrl={API_BASE_URL} token={auth.token} />
+          ) : activePage === "AI Predictions" ? (
+            <PredictionsPanel apiBaseUrl={API_BASE_URL} token={auth.token} user={auth.user} students={students} />
+          ) : activePage === "Settings" ? (
+            <AdminSettingsPanel apiBaseUrl={API_BASE_URL} token={auth.token} user={auth.user} />
+          ) : activePage === "Reports" ? (
+            <ReportsPanel apiBaseUrl={API_BASE_URL} token={auth.token} />
           ) : (
             <section className="module-placeholder">
               <div className="placeholder-icon"><Icon name={navItems.find((item) => item.label === activePage)?.icon || "settings"} size={30}/></div>
               <span className="section-kicker">EDUINSIGHT WORKSPACE</span>
               <h1>{activePage}</h1>
-              <p>This module is part of our project roadmap. We'll build it after the student management foundation is complete.</p>
+              <p>This section is not available yet.</p>
               <button className="primary-button" onClick={() => setActivePage("Overview")}>Back to overview <Icon name="arrow" size={16}/></button>
             </section>
           )}
