@@ -188,8 +188,14 @@ function App() {
     return () => { cancelled = true; };
   }, [auth?.token]);
 
+  function updateAuthField(field, value) {
+    setAuthForm((current) => ({ ...current, [field]: value }));
+    setAuthError("");
+  }
+
   async function handleAuthSubmit(event) {
     event.preventDefault();
+    if (authLoading) return;
     setAuthLoading(true);
     setAuthError("");
     const isRegister = authMode === "register";
@@ -204,14 +210,17 @@ function App() {
         body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || result.message || `Sign in failed (${response.status}).`);
+      if (!response.ok) {
+        const action = isRegister ? "Account creation" : "Sign in";
+        throw new Error(result.detail || result.message || `${action} failed (${response.status}).`);
+      }
       const nextAuth = { token: result.accessToken, user: result.user };
       sessionStorage.setItem("eduinsight_token", nextAuth.token);
       sessionStorage.setItem("eduinsight_user", JSON.stringify(nextAuth.user));
       setAuth(nextAuth);
       setAuthForm((current) => ({ ...current, password: "" }));
     } catch (err) {
-      setAuthError(err.message || "Unable to sign in.");
+      setAuthError(err.message || (isRegister ? "Unable to create your account." : "Unable to sign in."));
     } finally {
       setAuthLoading(false);
     }
@@ -346,30 +355,30 @@ function App() {
             <p className="auth-card-copy">{isRegister ? "Register with your academic details to open your personal workspace." : "Sign in to continue to your academic workspace."}</p>
             <label className="form-field auth-field">
               <span>Email address</span>
-              <input type="email" required autoComplete="email" value={authForm.email} onChange={(e) => setAuthForm({...authForm, email: e.target.value})} placeholder="you@college.edu" />
+              <input type="email" required disabled={authLoading} autoComplete="email" value={authForm.email} onChange={(e) => updateAuthField("email", e.target.value)} placeholder="you@college.edu" />
             </label>
             {isRegister && (
               <>
-                <label className="form-field auth-field"><span>Full name</span><input required maxLength="150" value={authForm.fullName} onChange={(e) => setAuthForm({...authForm, fullName: e.target.value})} placeholder="Your full name" /></label>
+                <label className="form-field auth-field"><span>Full name</span><input required disabled={authLoading} maxLength="150" value={authForm.fullName} onChange={(e) => updateAuthField("fullName", e.target.value)} placeholder="Your full name" /></label>
                 <div className="auth-fields-row">
-                  <label className="form-field auth-field"><span>Roll number</span><input required maxLength="50" value={authForm.rollNumber} onChange={(e) => setAuthForm({...authForm, rollNumber: e.target.value})} placeholder="Your roll number" /></label>
-                  <label className="form-field auth-field"><span>Department</span><select value={authForm.department} onChange={(e) => setAuthForm({...authForm, department: e.target.value})}><option value="AIML">AIML</option><option value="CSE">CSE</option><option value="ECE">ECE</option><option value="EEE">EEE</option><option value="IT">IT</option><option value="Other">Other</option></select></label>
+                  <label className="form-field auth-field"><span>Roll number</span><input required disabled={authLoading} maxLength="50" value={authForm.rollNumber} onChange={(e) => updateAuthField("rollNumber", e.target.value)} placeholder="Your roll number" /></label>
+                  <label className="form-field auth-field"><span>Department</span><select disabled={authLoading} value={authForm.department} onChange={(e) => updateAuthField("department", e.target.value)}><option value="AIML">AIML</option><option value="CSE">CSE</option><option value="ECE">ECE</option><option value="EEE">EEE</option><option value="IT">IT</option><option value="Other">Other</option></select></label>
                 </div>
                 <div className="auth-fields-row">
-                  <label className="form-field auth-field"><span>Academic year</span><select value={authForm.academicYear} onChange={(e) => setAuthForm({...authForm, academicYear: e.target.value})}><option value="1">First year</option><option value="2">Second year</option><option value="3">Third year</option><option value="4">Fourth year</option></select></label>
-                  <label className="form-field auth-field"><span>Section</span><select value={authForm.section} onChange={(e) => setAuthForm({...authForm, section: e.target.value})}><option value="A">Section A</option><option value="B">Section B</option><option value="C">Section C</option><option value="D">Section D</option></select></label>
+                  <label className="form-field auth-field"><span>Academic year</span><select disabled={authLoading} value={authForm.academicYear} onChange={(e) => updateAuthField("academicYear", e.target.value)}><option value="1">First year</option><option value="2">Second year</option><option value="3">Third year</option><option value="4">Fourth year</option></select></label>
+                  <label className="form-field auth-field"><span>Section</span><select disabled={authLoading} value={authForm.section} onChange={(e) => updateAuthField("section", e.target.value)}><option value="A">Section A</option><option value="B">Section B</option><option value="C">Section C</option><option value="D">Section D</option></select></label>
                 </div>
               </>
             )}
             <label className="form-field auth-field">
               <span>Password{isRegister ? " · at least 12 characters" : ""}</span>
-              <input type="password" required minLength={isRegister ? 12 : undefined} maxLength="72" autoComplete={isRegister ? "new-password" : "current-password"} value={authForm.password} onChange={(e) => setAuthForm({...authForm, password: e.target.value})} placeholder={isRegister ? "Create a strong password" : "Enter your password"} />
+              <input type="password" required disabled={authLoading} minLength={isRegister ? 12 : undefined} maxLength="72" autoComplete={isRegister ? "new-password" : "current-password"} value={authForm.password} onChange={(e) => updateAuthField("password", e.target.value)} placeholder={isRegister ? "Create a strong password" : "Enter your password"} />
             </label>
             {authError && <div className="auth-error" role="alert">{authError}</div>}
             <button className="primary-button auth-submit" type="submit" disabled={authLoading}>{authLoading ? "Please wait…" : isRegister ? "Create student account" : "Sign in"}</button>
             <div className="auth-switch">
               {isRegister ? "Already have an account?" : "New student?"}{" "}
-              <button type="button" onClick={() => {setAuthMode(isRegister ? "login" : "register");setAuthError("");}}> {isRegister ? "Sign in" : "Create an account"}</button>
+              <button type="button" disabled={authLoading} onClick={() => {setAuthMode(isRegister ? "login" : "register");setAuthError("");}}> {isRegister ? "Sign in" : "Create an account"}</button>
             </div>
             <p className="auth-access-note">Faculty accounts are created by an administrator.</p>
           </form>
