@@ -2,6 +2,12 @@
 
 React 19 and Vite dashboard for the Intelligent Academic Analytics and Student Performance Prediction System. It connects to the Spring Boot API in the separate backend repository.
 
+## Live project
+
+- **Application:** [https://ichigoo789.netlify.app](https://ichigoo789.netlify.app)
+- **Spring Boot API:** [https://academic-analytics-backend.onrender.com](https://academic-analytics-backend.onrender.com)
+- **Backend health check:** [https://academic-analytics-backend.onrender.com/api/test](https://academic-analytics-backend.onrender.com/api/test)
+
 ## Local development
 
 ```powershell
