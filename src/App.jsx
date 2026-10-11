@@ -212,7 +212,10 @@ function App() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const action = isRegister ? "Account creation" : "Sign in";
-        throw new Error(result.detail || result.message || `${action} failed (${response.status}).`);
+        const fallback = isRegister && response.status === 409
+          ? "That email or roll number is already registered. Use Sign in below if this is your account, or change the email or roll number."
+          : `${action} failed (${response.status}).`;
+        throw new Error(result.detail || result.message || fallback);
       }
       const nextAuth = { token: result.accessToken, user: result.user };
       sessionStorage.setItem("eduinsight_token", nextAuth.token);
