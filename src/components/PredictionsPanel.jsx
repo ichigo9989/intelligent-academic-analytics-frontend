@@ -90,7 +90,8 @@ export default function PredictionsPanel({ apiBaseUrl, token, user, students }) 
 
     {user.role === "ADMIN" && <form className="panel training-panel" onSubmit={train}>
       <div><span className="section-kicker">ADMINISTRATOR ACTION</span><h3>Train or replace the model</h3>
-        <p>Upload CSV with <code>attendance_percent</code>, <code>average_marks_percent</code>, and <code>final_score</code> columns. Use at least 30 real historical student-term rows; exclude names and direct identifiers. 25% is held out for evaluation.</p></div>
+        <p>Upload CSV with <code>attendance_percent</code>, <code>average_marks_percent</code>, and <code>final_score</code> columns. Use at least 30 real historical student-term rows; exclude names and direct identifiers. Values must be 0–100. 25% is held out for evaluation. If a student appears in multiple terms, include a stable pseudonymous <code>student_group</code> column.</p>
+        <a href="/dataset-template.csv" download>Download the CSV template</a></div>
       <label className="form-field"><span>Labeled CSV file (10 MB max)</span><input type="file" accept=".csv,text/csv" onChange={(event) => setTrainingFile(event.target.files?.[0] || null)} /></label>
       <button className="primary-button" disabled={training || !trainingFile}>{training ? "Training model…" : "Train model"}</button>
       {trainingResult && <div className="training-result" role="status">Trained on {trainingResult.metrics?.trainRows} rows; evaluated on {trainingResult.metrics?.testRows}. MAE {trainingResult.metrics?.mae}, RMSE {trainingResult.metrics?.rmse}, R² {trainingResult.metrics?.r2}.</div>}
