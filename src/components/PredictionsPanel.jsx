@@ -85,16 +85,16 @@ export default function PredictionsPanel({ apiBaseUrl, token, user, students }) 
     <div className="model-status-card panel">
       <span className={`model-status-dot ${status?.modelTrained ? "trained" : ""}`} />
       <div><strong>{status?.modelTrained ? status.configured ? "A trained model is available" : "A trained model is stored · ML service is not configured" : status?.configured ? "ML service connected · no trained model" : "ML service is not configured"}</strong>
-        <p>{status?.modelTrained ? `Model trained ${status.trainedAt || ""}.` : "Predictions remain unavailable until an administrator trains a model with real labeled student-term data."}</p></div>
+        <p>{status?.modelTrained ? `${status.algorithm} · version ${status.modelVersion} · trained ${status.trainedAt || ""}.` : "Predictions remain unavailable until an administrator trains a model with real labeled student-term data."}</p></div>
     </div>
 
     {user.role === "ADMIN" && <form className="panel training-panel" onSubmit={train}>
       <div><span className="section-kicker">ADMINISTRATOR ACTION</span><h3>Train or replace the model</h3>
-        <p>Upload CSV with <code>attendance_percent</code>, <code>average_marks_percent</code>, and <code>final_score</code> columns. Use at least 30 real historical student-term rows; exclude names and direct identifiers. Values must be 0–100. 25% is held out for evaluation. If a student appears in multiple terms, include a stable pseudonymous <code>student_group</code> column.</p>
+        <p>Upload CSV with <code>attendance_percent</code>, <code>average_marks_percent</code>, and <code>final_score</code> columns. Use at least 30 real historical student-term rows; exclude names and direct identifiers. Values must be 0–100. Candidate regressors are compared by five-fold cross-validation within the training partition; 25% is held out for final evaluation. If a student appears in multiple terms, include a stable pseudonymous <code>student_group</code> column.</p>
         <a href="/dataset-template.csv" download>Download the CSV template</a></div>
       <label className="form-field"><span>Labeled CSV file (10 MB max)</span><input type="file" accept=".csv,text/csv" onChange={(event) => setTrainingFile(event.target.files?.[0] || null)} /></label>
       <button className="primary-button" disabled={training || !trainingFile}>{training ? "Training model…" : "Train model"}</button>
-      {trainingResult && <div className="training-result" role="status">Trained on {trainingResult.metrics?.trainRows} rows; evaluated on {trainingResult.metrics?.testRows}. MAE {trainingResult.metrics?.mae}, RMSE {trainingResult.metrics?.rmse}, R² {trainingResult.metrics?.r2}.</div>}
+      {trainingResult && <div className="training-result" role="status">Selected {trainingResult.algorithm} (version {trainingResult.modelVersion}) using cross-validation MAE {trainingResult.metrics?.cvMae}. Holdout: MAE {trainingResult.metrics?.mae}, RMSE {trainingResult.metrics?.rmse}, R² {trainingResult.metrics?.r2} across {trainingResult.metrics?.testRows} rows. Candidate CV MAE: {Object.entries(trainingResult.crossValidationMae || {}).map(([name, mae]) => `${name} ${mae}`).join(" · ")}.</div>}
     </form>}
 
     <form className="panel prediction-panel" onSubmit={runPrediction}>
@@ -103,6 +103,6 @@ export default function PredictionsPanel({ apiBaseUrl, token, user, students }) 
         <button className="primary-button" disabled={predicting || !status?.modelTrained || !status?.configured || !selectedStudent}>{predicting ? "Estimating…" : "Generate estimate"}</button></div>
     </form>
     {error && <div className="error-banner" role="alert">{error}</div>}
-    {prediction && <section className="panel prediction-result"><span className="section-kicker">MODEL OUTPUT · {prediction.target}</span><h2>{prediction.predictedFinalScore.toFixed(1)}<small> / 100</small></h2><p>{prediction.studentName}: attendance {prediction.attendancePercent}% · current marks {prediction.averageMarksPercent}%.</p><div className="prediction-metrics">Holdout MAE {prediction.modelMetrics?.mae} · RMSE {prediction.modelMetrics?.rmse} · R² {prediction.modelMetrics?.r2}</div><small>Model trained at {prediction.trainedAt}. Consider the estimate alongside individual context.</small></section>}
+    {prediction && <section className="panel prediction-result"><span className="section-kicker">MODEL OUTPUT · {prediction.target}</span><h2>{prediction.predictedFinalScore.toFixed(1)}<small> / 100</small></h2><p>{prediction.studentName}: attendance {prediction.attendancePercent}% · current marks {prediction.averageMarksPercent}%.</p><div className="prediction-metrics">{prediction.algorithm} {prediction.modelVersion} · Holdout MAE {prediction.modelMetrics?.mae} · RMSE {prediction.modelMetrics?.rmse} · R² {prediction.modelMetrics?.r2}</div><small>Predicted at {prediction.predictedAt}. Model trained at {prediction.trainedAt}. Consider the estimate alongside individual context.</small></section>}
   </section>;
 }

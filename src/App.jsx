@@ -7,7 +7,10 @@ import AdminSettingsPanel from "./components/AdminSettingsPanel.jsx";
 import ReportsPanel from "./components/ReportsPanel.jsx";
 import "./App.css";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8081").replace(/\/+$/, "");
+const DEFAULT_API_BASE_URL = import.meta.env.DEV
+  ? "http://localhost:8081"
+  : "https://academic-analytics-backend.onrender.com";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
 const API_URL = `${API_BASE_URL}/api/students`;
 
 function getStoredAuth() {
