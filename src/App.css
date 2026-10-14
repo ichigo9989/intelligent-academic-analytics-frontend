@@ -449,6 +449,10 @@ h1 { margin: 11px 0 8px; color: #202941; font: 800 clamp(25px, 2.4vw, 33px)/1.25
 .training-panel p code { color: #544fc9; background: #f1f0ff; border-radius: 4px; padding: 2px 4px; }
 .training-panel .primary-button { justify-self: start; }
 .training-result { padding: 11px 13px; border-radius: 8px; background: #e8f7f0; color: #177554; font-size: 11px; }
+.training-result > strong { display: block; margin-bottom: 7px; }
+.training-result > div { margin-top: 5px; line-height: 1.6; }
+.dataset-template-links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
+.selected-file-list { color: var(--muted); }
 .prediction-controls { display: flex; align-items: flex-end; gap: 12px; }
 .prediction-controls .form-field { flex: 1; }
 .prediction-result { padding: 24px; }
